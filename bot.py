@@ -116,4 +116,10 @@ async def photo_handler(message: Message):
 
 
 if __name__ == "__main__":
-    dp.run_polling(bot)
+    import asyncio
+
+async def main():
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
+
+asyncio.run(main())
