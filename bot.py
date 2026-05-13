@@ -9,7 +9,7 @@ from aiogram.enums import ParseMode
 
 from dotenv import load_dotenv
 
-import google.generativeai as genai
+from google import genai
 from PIL import Image
 
 load_dotenv()
@@ -19,9 +19,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 ALLOWED_USER_ID = 456174801
 
-genai.configure(api_key=GEMINI_API_KEY)
-
-model = genai.GenerativeModel("gemini-pro-vision")
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 bot = Bot(
     token=BOT_TOKEN,
@@ -72,7 +70,10 @@ async def photo_handler(message: Message):
         }
         """
 
-        response = model.generate_content([prompt, image])
+        response = client.models.generate_content(
+    model="gemini-2.0-flash",
+    contents=[prompt, image]
+)
 
         text = (
             response.text
