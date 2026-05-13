@@ -31,18 +31,21 @@ bot = Bot(
 dp = Dispatcher()
 
 
-last_request_time = {} @dp.message(F.photo)
-async def photo_handler(message: Message):import time
+last_request_time = {}
+@dp.message(F.photo)
+async def photo_handler(message: Message):
 
-user_id = message.from_user.id
-now = time.time()
+    import time
 
-if user_id in last_request_time:
-    if now - last_request_time[user_id] < 20:
-        await message.answer("Подожди 20 секунд перед следующим фото.")
-        return
+    user_id = message.from_user.id
+    now = time.time()
 
-last_request_time[user_id] = now
+    if user_id in last_request_time:
+        if now - last_request_time[user_id] < 20:
+            await message.answer("Подожди 20 секунд перед следующим фото.")
+            return
+
+    last_request_time[user_id] = now
 
     if message.from_user.id != ALLOWED_USER_ID:
         return
