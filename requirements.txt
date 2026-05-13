@@ -1,4 +1,4 @@
-aiogram==3.7.0
-google-generativeai==0.7.2
+aiogram==3.4.1
+google-generativeai==0.5.4
 pillow
 python-dotenv
