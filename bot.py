@@ -1,6 +1,8 @@
 import os
 import json
 import tempfile
+import asyncio
+import time
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
@@ -11,6 +13,7 @@ from dotenv import load_dotenv
 
 from google import genai
 from PIL import Image
+
 
 load_dotenv()
 
@@ -30,96 +33,127 @@ bot = Bot(
 
 dp = Dispatcher()
 
-
 last_request_time = {}
+
+
 @dp.message(F.photo)
 async def photo_handler(message: Message):
-
-    import time
 
     user_id = message.from_user.id
     now = time.time()
 
+    # Ограничение запросов
     if user_id in last_request_time:
         if now - last_request_time[user_id] < 20:
-            await message.answer("Подожди 20 секунд перед следующим фото.")
+            await message.answer(
+                "Подожди 20 секунд перед следующим фото."
+            )
             return
 
     last_request_time[user_id] = now
 
-    if message.from_user.id != ALLOWED_USER_ID:
+    # Только твой доступ
+    if user_id != ALLOWED_USER_ID:
         return
 
-    photo = message.photo[-1]
+    try:
 
-    file = await bot.get_file(photo.file_id)
+        photo = message.photo[-1]
 
-    with tempfile.NamedTemporaryFile(suffix=".jpg") as temp:
+        file = await bot.get_file(photo.file_id)
 
-        await bot.download_file(file.file_path, temp.name)
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as temp:
 
-        image = Image.open(temp.name)
+            await bot.download_file(file.file_path, temp.name)
 
-        prompt = """
-        Ты анализатор питания.
+            image = Image.open(temp.name)
 
-        Определи:
-        - название блюда
-        - примерный вес
-        - калории
-        - белки
-        - жиры
-        - углеводы
+            prompt = """
+            Ты анализатор питания.
 
-        Ответ строго JSON:
+            Определи:
+            - название блюда
+            - примерный вес
+            - калории
+            - белки
+            - жиры
+            - углеводы
 
-        {
-          "name": "",
-          "weight_g": 0,
-          "calories": 0,
-          "protein": 0,
-          "fat": 0,
-          "carbs": 0
-        }
-        """
+            Ответ строго JSON:
 
-        response = client.models.generate_content(
-    model="gemini-2.0-flash",
-    contents=[prompt, image]
-)
+            {
+              "name": "",
+              "weight_g": 0,
+              "calories": 0,
+              "protein": 0,
+              "fat": 0,
+              "carbs": 0
+            }
+            """
 
-        text = (
-            response.text
-            .replace("```json", "")
-            .replace("```", "")
-            .strip()
-        )
+            try:
 
-        try:
-            data = json.loads(text)
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash-lite",
+                    contents=[prompt, image]
+                )
 
-            answer = f"""
-<b>{data['name']}</b>
+            except Exception as e:
 
-Вес: ~{data['weight_g']} г
-Калории: ~{data['calories']} ккал
+                print(e)
 
-Б: {data['protein']} г
-Ж: {data['fat']} г
-У: {data['carbs']} г
+                await message.answer(
+                    "Лимит Gemini временно достигнут.\nПопробуй через пару минут."
+                )
+
+                return
+
+            text = (
+                response.text
+                .replace("```json", "")
+                .replace("```", "")
+                .strip()
+            )
+
+            try:
+
+                data = json.loads(text)
+
+                answer = f"""
+<b>{data.get('name', 'Неизвестное блюдо')}</b>
+
+Вес: ~{data.get('weight_g', '?')} г
+Калории: ~{data.get('calories', '?')} ккал
+
+Б: {data.get('protein', '?')} г
+Ж: {data.get('fat', '?')} г
+У: {data.get('carbs', '?')} г
 """
 
-            await message.answer(answer)
+                await message.answer(answer)
 
-        except Exception:
-            await message.answer(text)
+            except Exception:
+
+                await message.answer(
+                    f"Ошибка обработки ответа:\n\n{text}"
+                )
+
+    except Exception as e:
+
+        print(e)
+
+        await message.answer(
+            "Произошла ошибка при обработке фото."
+        )
+
+
+async def main():
+
+    await bot.delete_webhook(drop_pending_updates=True)
+
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
-    import asyncio
 
-async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
-
-asyncio.run(main())
+    asyncio.run(main())
