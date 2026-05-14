@@ -4,7 +4,10 @@ import base64
 import tempfile
 import time
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, Update
 from aiogram.client.default import DefaultBotProperties
@@ -40,9 +43,30 @@ bot = Bot(
 
 dp = Dispatcher()
 
-app = FastAPI()
-
 last_request_time = {}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    print("STARTING WEBHOOK")
+    print(WEBHOOK_URL)
+
+    await bot.delete_webhook(drop_pending_updates=True)
+
+    await bot.set_webhook(WEBHOOK_URL)
+
+    webhook_info = await bot.get_webhook_info()
+
+    print("WEBHOOK INFO:")
+    print(webhook_info)
+
+    yield
+
+    await bot.delete_webhook()
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @dp.message(F.photo)
@@ -144,23 +168,11 @@ async def photo_handler(message: Message):
 
     except Exception as e:
 
-        print(e)
+        print("ERROR:", e)
 
         await message.answer(
             "Ошибка обработки фото."
         )
-
-
-@app.on_event("startup")
-async def startup():
-
-    await bot.set_webhook(WEBHOOK_URL)
-
-
-@app.on_event("shutdown")
-async def shutdown():
-
-    await bot.delete_webhook()
 
 
 @app.post(WEBHOOK_PATH)
