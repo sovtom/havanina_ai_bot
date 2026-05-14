@@ -5,7 +5,6 @@ import tempfile
 import traceback
 
 from dotenv import load_dotenv
-from PIL import Image
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, Update
@@ -13,7 +12,6 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from fastapi import FastAPI, Request
-from contextlib import asynccontextmanager
 
 import uvicorn
 import requests
@@ -55,10 +53,14 @@ last_request_time = {}
 
 @dp.message(F.text == "/start")
 async def start_handler(message: Message):
+
+    print("WEBHOOK EVENT RECEIVED")
     print("TEXT MESSAGE: /start")
     print(f"USER ID: {message.from_user.id}")
 
-    await message.answer("Бот работает. Отправь фото еды.")
+    await message.answer(
+        "Бот работает.\n\nОтправь фото еды."
+    )
 
 # =========================
 # PHOTO HANDLER
@@ -80,7 +82,9 @@ async def photo_handler(message: Message):
         # RATE LIMIT
         if user_id in last_request_time:
             if now - last_request_time[user_id] < 20:
-                await message.answer("Подожди 20 секунд перед следующим фото.")
+                await message.answer(
+                    "Подожди 20 секунд перед следующим фото."
+                )
                 return
 
         last_request_time[user_id] = now
@@ -99,11 +103,11 @@ async def photo_handler(message: Message):
 
             await bot.download_file(file.file_path, temp.name)
 
-            # READ IMAGE
             with open(temp.name, "rb") as image_file:
-                image_base64 = base64.b64encode(image_file.read()).decode("utf-8")
+                image_base64 = base64.b64encode(
+                    image_file.read()
+                ).decode("utf-8")
 
-            # PROMPT
             prompt = """
 Ты анализатор питания.
 
@@ -127,7 +131,6 @@ async def photo_handler(message: Message):
 }
 """
 
-            # OPENROUTER REQUEST
             response = requests.post(
                 url="https://openrouter.ai/api/v1/chat/completions",
                 headers={
@@ -135,7 +138,7 @@ async def photo_handler(message: Message):
                     "Content-Type": "application/json"
                 },
                 json={
-                    model="qwen/qwen2.5-vl-72b-instruct",
+                    "model": "qwen/qwen2.5-vl-72b-instruct",
                     "messages": [
                         {
                             "role": "user",
@@ -157,14 +160,16 @@ async def photo_handler(message: Message):
                 timeout=120
             )
 
-            # RESPONSE CHECK
+            # OPENROUTER ERROR
             if response.status_code != 200:
+
                 print("ERROR:")
                 print(response.text)
 
                 await message.answer(
                     f"Ошибка OpenRouter:\n{response.text}"
                 )
+
                 return
 
             result = response.json()
@@ -199,6 +204,7 @@ async def photo_handler(message: Message):
                 await message.answer(answer)
 
             except Exception:
+
                 await message.answer(text)
 
     except Exception as e:
@@ -206,7 +212,9 @@ async def photo_handler(message: Message):
         print("ERROR:")
         traceback.print_exc()
 
-        await message.answer(f"Ошибка:\n{str(e)}")
+        await message.answer(
+            f"Ошибка:\n{str(e)}"
+        )
 
 # =========================
 # FASTAPI
@@ -228,14 +236,19 @@ async def bot_webhook(request: Request):
 
         data = await request.json()
 
-        update = Update.model_validate(data, context={"bot": bot})
+        update = Update.model_validate(
+            data,
+            context={"bot": bot}
+        )
 
         await dp.feed_update(bot, update)
 
         return {"ok": True}
 
     except Exception:
+
         traceback.print_exc()
+
         return {"ok": False}
 
 # =========================
@@ -261,6 +274,7 @@ async def on_startup():
 
 @app.on_event("shutdown")
 async def on_shutdown():
+
     await bot.session.close()
 
 # =========================
