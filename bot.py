@@ -45,6 +45,7 @@ async def photo_handler(message: Message):
     user_id = message.from_user.id
     now = time.time()
 
+    # Ограничение запросов
     if user_id in last_request_time:
         if now - last_request_time[user_id] < 20:
             await message.answer(
@@ -54,6 +55,7 @@ async def photo_handler(message: Message):
 
     last_request_time[user_id] = now
 
+    # Только твой Telegram ID
     if user_id != ALLOWED_USER_ID:
         return
 
@@ -72,39 +74,51 @@ async def photo_handler(message: Message):
                     image_file.read()
                 ).decode("utf-8")
 
-            completion = client.chat.completions.create(
-               model="qwen/qwen2.5-vl-7b-instruct:free",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": """
-                                Определи еду на фото.
+            try:
 
-                                Верни строго JSON:
-
+                completion = client.chat.completions.create(
+                    model="qwen/qwen2.5-vl-72b-instruct:free",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
                                 {
-                                  "name": "",
-                                  "weight_g": 0,
-                                  "calories": 0,
-                                  "protein": 0,
-                                  "fat": 0,
-                                  "carbs": 0
+                                    "type": "text",
+                                    "text": """
+                                    Определи еду на фото.
+
+                                    Верни строго JSON:
+
+                                    {
+                                      "name": "",
+                                      "weight_g": 0,
+                                      "calories": 0,
+                                      "protein": 0,
+                                      "fat": 0,
+                                      "carbs": 0
+                                    }
+                                    """
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{base64_image}"
+                                    }
                                 }
-                                """
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{base64_image}"
-                                }
-                            }
-                        ]
-                    }
-                ]
-            )
+                            ]
+                        }
+                    ]
+                )
+
+            except Exception as e:
+
+                print("OpenRouter error:", e)
+
+                await message.answer(
+                    "Ошибка AI API. Попробуй позже."
+                )
+
+                return
 
             text = completion.choices[0].message.content
 
@@ -134,11 +148,13 @@ async def photo_handler(message: Message):
 
             except Exception:
 
-                await message.answer(text)
+                await message.answer(
+                    f"Не удалось обработать ответ AI:\n\n{text}"
+                )
 
     except Exception as e:
 
-        print(e)
+        print("General error:", e)
 
         await message.answer(
             "Ошибка обработки фото."
