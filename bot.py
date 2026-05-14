@@ -2,11 +2,11 @@ import os
 import json
 import base64
 import tempfile
-import asyncio
 import time
 
+from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
+from aiogram.types import Message, Update
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
@@ -19,8 +19,12 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")
 
 ALLOWED_USER_ID = 456174801
+
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+WEBHOOK_URL = f"https://{RAILWAY_STATIC_URL}{WEBHOOK_PATH}"
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
@@ -36,6 +40,8 @@ bot = Bot(
 
 dp = Dispatcher()
 
+app = FastAPI()
+
 last_request_time = {}
 
 
@@ -45,7 +51,6 @@ async def photo_handler(message: Message):
     user_id = message.from_user.id
     now = time.time()
 
-    # Ограничение запросов
     if user_id in last_request_time:
         if now - last_request_time[user_id] < 20:
             await message.answer(
@@ -55,7 +60,6 @@ async def photo_handler(message: Message):
 
     last_request_time[user_id] = now
 
-    # Только твой Telegram ID
     if user_id != ALLOWED_USER_ID:
         return
 
@@ -74,51 +78,39 @@ async def photo_handler(message: Message):
                     image_file.read()
                 ).decode("utf-8")
 
-            try:
+            completion = client.chat.completions.create(
+                model="google/gemma-3-27b-it:free",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": """
+                                Определи еду на фото.
 
-                completion = client.chat.completions.create(
-                    model="google/gemma-3-27b-it:free",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
+                                Верни строго JSON:
+
                                 {
-                                    "type": "text",
-                                    "text": """
-                                    Определи еду на фото.
-
-                                    Верни строго JSON:
-
-                                    {
-                                      "name": "",
-                                      "weight_g": 0,
-                                      "calories": 0,
-                                      "protein": 0,
-                                      "fat": 0,
-                                      "carbs": 0
-                                    }
-                                    """
-                                },
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{base64_image}"
-                                    }
+                                  "name": "",
+                                  "weight_g": 0,
+                                  "calories": 0,
+                                  "protein": 0,
+                                  "fat": 0,
+                                  "carbs": 0
                                 }
-                            ]
-                        }
-                    ]
-                )
-
-            except Exception as e:
-
-                print("OpenRouter error:", e)
-
-                await message.answer(
-                    "Ошибка AI API. Попробуй позже."
-                )
-
-                return
+                                """
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            )
 
             text = completion.choices[0].message.content
 
@@ -148,28 +140,36 @@ async def photo_handler(message: Message):
 
             except Exception:
 
-                await message.answer(
-                    f"Не удалось обработать ответ AI:\n\n{text}"
-                )
+                await message.answer(text)
 
     except Exception as e:
 
-        print("General error:", e)
+        print(e)
 
         await message.answer(
             "Ошибка обработки фото."
         )
 
 
-async def main():
+@app.on_event("startup")
+async def startup():
 
-    await bot.delete_webhook(
-        drop_pending_updates=True
-    )
-
-    await dp.start_polling(bot)
+    await bot.set_webhook(WEBHOOK_URL)
 
 
-if __name__ == "__main__":
+@app.on_event("shutdown")
+async def shutdown():
 
-    asyncio.run(main())
+    await bot.delete_webhook()
+
+
+@app.post(WEBHOOK_PATH)
+async def bot_webhook(request: Request):
+
+    data = await request.json()
+
+    update = Update.model_validate(data)
+
+    await dp.feed_update(bot, update)
+
+    return {"ok": True}
