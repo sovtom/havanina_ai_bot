@@ -77,7 +77,7 @@ async def photo_handler(message: Message):
             try:
 
                 completion = client.chat.completions.create(
-                    model="qwen/qwen2.5-vl-72b-instruct:free",
+                    model="google/gemma-3-27b-it:free",
                     messages=[
                         {
                             "role": "user",
