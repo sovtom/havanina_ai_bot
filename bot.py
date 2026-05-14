@@ -24,8 +24,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")
 
-ALLOWED_USER_ID = 456174801
-
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"https://{RAILWAY_STATIC_URL}{WEBHOOK_PATH}"
 
@@ -69,12 +67,26 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+# ПРОВЕРКА ТЕКСТА
+@dp.message(F.text)
+async def text_handler(message: Message):
+
+    print("TEXT MESSAGE:", message.text)
+    print("USER ID:", message.from_user.id)
+
+    await message.answer("Бот работает.")
+
+
+# ОБРАБОТКА ФОТО
 @dp.message(F.photo)
 async def photo_handler(message: Message):
 
     user_id = message.from_user.id
     now = time.time()
 
+    print("PHOTO FROM:", user_id)
+
+    # Ограничение запросов
     if user_id in last_request_time:
         if now - last_request_time[user_id] < 20:
             await message.answer(
@@ -83,9 +95,6 @@ async def photo_handler(message: Message):
             return
 
     last_request_time[user_id] = now
-
-    if user_id != ALLOWED_USER_ID:
-        return
 
     try:
 
@@ -98,6 +107,7 @@ async def photo_handler(message: Message):
             await bot.download_file(file.file_path, temp.name)
 
             with open(temp.name, "rb") as image_file:
+
                 base64_image = base64.b64encode(
                     image_file.read()
                 ).decode("utf-8")
@@ -138,6 +148,9 @@ async def photo_handler(message: Message):
 
             text = completion.choices[0].message.content
 
+            print("AI RESPONSE:")
+            print(text)
+
             text = (
                 text
                 .replace("```json", "")
@@ -164,11 +177,14 @@ async def photo_handler(message: Message):
 
             except Exception:
 
-                await message.answer(text)
+                await message.answer(
+                    f"Ошибка JSON:\n\n{text}"
+                )
 
     except Exception as e:
 
-        print("ERROR:", e)
+        print("ERROR:")
+        print(e)
 
         await message.answer(
             "Ошибка обработки фото."
@@ -179,6 +195,8 @@ async def photo_handler(message: Message):
 async def bot_webhook(request: Request):
 
     data = await request.json()
+
+    print("WEBHOOK EVENT RECEIVED")
 
     update = Update.model_validate(data)
 
