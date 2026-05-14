@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 import tempfile
 import asyncio
 import time
@@ -11,18 +12,20 @@ from aiogram.enums import ParseMode
 
 from dotenv import load_dotenv
 
-from google import genai
-from PIL import Image
+from openai import OpenAI
 
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 ALLOWED_USER_ID = 456174801
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=OPENROUTER_API_KEY,
+)
 
 bot = Bot(
     token=BOT_TOKEN,
@@ -42,7 +45,6 @@ async def photo_handler(message: Message):
     user_id = message.from_user.id
     now = time.time()
 
-    # Ограничение запросов
     if user_id in last_request_time:
         if now - last_request_time[user_id] < 20:
             await message.answer(
@@ -52,7 +54,6 @@ async def photo_handler(message: Message):
 
     last_request_time[user_id] = now
 
-    # Только твой доступ
     if user_id != ALLOWED_USER_ID:
         return
 
@@ -66,50 +67,49 @@ async def photo_handler(message: Message):
 
             await bot.download_file(file.file_path, temp.name)
 
-            image = Image.open(temp.name)
+            with open(temp.name, "rb") as image_file:
+                base64_image = base64.b64encode(
+                    image_file.read()
+                ).decode("utf-8")
 
-            prompt = """
-            Ты анализатор питания.
+            completion = client.chat.completions.create(
+                model="meta-llama/llama-3.2-11b-vision-instruct:free",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": """
+                                Определи еду на фото.
 
-            Определи:
-            - название блюда
-            - примерный вес
-            - калории
-            - белки
-            - жиры
-            - углеводы
+                                Верни строго JSON:
 
-            Ответ строго JSON:
+                                {
+                                  "name": "",
+                                  "weight_g": 0,
+                                  "calories": 0,
+                                  "protein": 0,
+                                  "fat": 0,
+                                  "carbs": 0
+                                }
+                                """
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            )
 
-            {
-              "name": "",
-              "weight_g": 0,
-              "calories": 0,
-              "protein": 0,
-              "fat": 0,
-              "carbs": 0
-            }
-            """
-
-            try:
-
-                response = client.models.generate_content(
-                    model="gemini-2.0-flash-lite",
-                    contents=[prompt, image]
-                )
-
-            except Exception as e:
-
-                print(e)
-
-                await message.answer(
-                    "Лимит Gemini временно достигнут.\nПопробуй через пару минут."
-                )
-
-                return
+            text = completion.choices[0].message.content
 
             text = (
-                response.text
+                text
                 .replace("```json", "")
                 .replace("```", "")
                 .strip()
@@ -134,22 +134,22 @@ async def photo_handler(message: Message):
 
             except Exception:
 
-                await message.answer(
-                    f"Ошибка обработки ответа:\n\n{text}"
-                )
+                await message.answer(text)
 
     except Exception as e:
 
         print(e)
 
         await message.answer(
-            "Произошла ошибка при обработке фото."
+            "Ошибка обработки фото."
         )
 
 
 async def main():
 
-    await bot.delete_webhook(drop_pending_updates=True)
+    await bot.delete_webhook(
+        drop_pending_updates=True
+    )
 
     await dp.start_polling(bot)
 
