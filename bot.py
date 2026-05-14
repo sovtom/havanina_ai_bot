@@ -135,7 +135,7 @@ async def photo_handler(message: Message):
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "qwen/qwen2.5-vl-7b-instruct:free",
+                    model="qwen/qwen2.5-vl-72b-instruct",
                     "messages": [
                         {
                             "role": "user",
