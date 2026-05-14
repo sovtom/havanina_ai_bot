@@ -113,7 +113,7 @@ async def photo_handler(message: Message):
                 ).decode("utf-8")
 
             completion = client.chat.completions.create(
-                model="qwen/qwen2.5-vl-7b-instruct:free",
+                model="qwen/qwen2.5-vl-7b-instruct",
                 messages=[
                     {
                         "role": "user",
@@ -182,9 +182,12 @@ async def photo_handler(message: Message):
                 )
 
     except Exception as e:
+    import traceback
 
-        print("ERROR:")
-        print(e)
+    print("ERROR:")
+    traceback.print_exc()
+
+    await message.answer(f"Ошибка:\n{str(e)}")
 
         await message.answer(
             "Ошибка обработки фото."
