@@ -1,7 +1,6 @@
-aiogram==3.4.1
+aiogram
 fastapi
 uvicorn
-openai
 python-dotenv
 requests
-Pillow
+google-generativeai
