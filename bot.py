@@ -1,8 +1,13 @@
+# Полный обновленный bot.py
+
+````python
 import os
 import json
 import base64
 import tempfile
 import traceback
+import asyncio
+from datetime import datetime
 
 from dotenv import load_dotenv
 
@@ -60,6 +65,85 @@ dp = Dispatcher()
 # =========================
 
 last_request_time = {}
+
+# =========================
+# CALORIES STORAGE
+# =========================
+
+# Формат:
+# {
+#   "chatid_threadid": {
+#       "calories": 1234,
+#       "chat_id": -100123,
+#       "thread_id": 111
+#   }
+# }
+
+calories_stats = {}
+
+# =========================
+# DAILY REPORT TASK
+# =========================
+
+async def daily_report_loop():
+
+    while True:
+
+        now = datetime.now()
+
+        # Ждем до 00:00
+        next_midnight = now.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0
+        )
+
+        if next_midnight <= now:
+            from datetime import timedelta
+            next_midnight += timedelta(days=1)
+
+        sleep_seconds = (next_midnight - now).total_seconds()
+
+        await asyncio.sleep(sleep_seconds)
+
+        report_date = datetime.now().strftime("%d.%m.%Y")
+
+        print("SENDING DAILY REPORTS")
+
+        for key, stats in calories_stats.items():
+
+            try:
+
+                total = round(stats["calories"])
+
+                text = (
+                    f"Всего захавано {total} каллорий "
+                    f"за {report_date}"
+                )
+
+                # Если это тема
+                if stats["thread_id"]:
+
+                    await bot.send_message(
+                        chat_id=stats["chat_id"],
+                        text=text,
+                        message_thread_id=stats["thread_id"]
+                    )
+
+                # Если обычная группа
+                else:
+
+                    await bot.send_message(
+                        chat_id=stats["chat_id"],
+                        text=text
+                    )
+
+            except Exception:
+                traceback.print_exc()
+
+        # Сбрасываем статистику после отправки
+        calories_stats.clear()
 
 # =========================
 # START COMMAND
@@ -243,6 +327,32 @@ async def photo_handler(message: Message):
 
                 data = json.loads(text)
 
+                # =========================
+                # SAVE CALORIES
+                # =========================
+
+                thread_id = message.message_thread_id
+
+                key = f"{message.chat.id}_{thread_id}"
+
+                if key not in calories_stats:
+                    calories_stats[key] = {
+                        "calories": 0,
+                        "chat_id": message.chat.id,
+                        "thread_id": thread_id
+                    }
+
+                calories_stats[key]["calories"] += float(
+                    data["total_calories"]
+                )
+
+                print("CALORIES SAVED")
+                print(calories_stats)
+
+                # =========================
+                # ANSWER
+                # =========================
+
                 answer = f"""
 <b>{data['name']}</b>
 
@@ -256,6 +366,8 @@ async def photo_handler(message: Message):
                 await message.answer(answer)
 
             except Exception:
+
+                traceback.print_exc()
 
                 await message.answer(text)
 
@@ -332,6 +444,9 @@ async def on_startup():
     print("WEBHOOK INFO:")
     print(info)
 
+    # ЗАПУСК ЕЖЕДНЕВНОГО ОТЧЕТА
+    asyncio.create_task(daily_report_loop())
+
 # =========================
 # SHUTDOWN
 # =========================
@@ -353,3 +468,4 @@ if __name__ == "__main__":
         port=8080,
         reload=False
     )
+````
