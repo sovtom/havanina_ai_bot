@@ -369,6 +369,55 @@ def get_nutrition_data(product_name, weight_g):
         return None
 
 # =========================
+# FALLBACK OCR NUTRITION
+# =========================
+
+def extract_nutrition_from_label(
+    image_base64,
+    product_name,
+    weight_g
+):
+
+    prompt = f"""
+На фото упаковка продукта.
+
+Нужно ВНИМАТЕЛЬНО прочитать этикетку.
+
+Продукт:
+{product_name}
+
+Вес:
+{weight_g} г
+
+Найди:
+- калории на 100 г
+
+Если есть калории на порцию —
+пересчитай на весь продукт.
+
+Ответ строго JSON:
+
+{{
+  "calories_per_100g": 0,
+  "total_calories": 0
+}}
+"""
+
+    text = analyze_product(
+        prompt,
+        image_base64
+    )
+
+    text = (
+        text
+        .replace("```json", "")
+        .replace("```", "")
+        .strip()
+    )
+
+    return json.loads(text)
+
+# =========================
 # PHOTO HANDLER
 # =========================
 
@@ -461,12 +510,30 @@ async def photo_handler(message: Message):
                 weight
             )
 
+            # =========================
+            # FALLBACK TO LABEL OCR
+            # =========================
+
             if not nutrition:
 
-                nutrition = {
-                    "calories_per_100g": "?",
-                    "total_calories": "?"
-                }
+                print("USE OCR FALLBACK")
+
+                try:
+
+                    nutrition = extract_nutrition_from_label(
+                        image_base64,
+                        name,
+                        weight
+                    )
+
+                except Exception:
+
+                    traceback.print_exc()
+
+                    nutrition = {
+                        "calories_per_100g": "?",
+                        "total_calories": "?"
+                    }
 
             if nutrition["total_calories"] != "?":
 
