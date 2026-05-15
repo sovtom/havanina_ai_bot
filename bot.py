@@ -26,10 +26,20 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")
 
-# ID ГРУППЫ
-ALLOWED_CHATS = [
-    -1003919465725,
-    -1003923256615
+# =========================
+# ACCESS SETTINGS
+# =========================
+
+# ГРУППА №1 — бот работает везде
+MAIN_GROUP_ID = -1003919465725
+
+# ГРУППА №2 — бот работает только в темах
+TOPIC_GROUP_ID = -1000000000000
+
+# РАЗРЕШЕННЫЕ ТЕМЫ
+ALLOWED_TOPICS = [
+    123,
+    456
 ]
 
 # =========================
@@ -61,6 +71,7 @@ async def start_handler(message: Message):
     print("WEBHOOK EVENT RECEIVED")
     print("TEXT MESSAGE: /start")
     print(f"CHAT ID: {message.chat.id}")
+    print(f"THREAD ID: {message.message_thread_id}")
     print(f"USER ID: {message.from_user.id}")
 
     await message.answer(
@@ -79,13 +90,17 @@ async def photo_handler(message: Message):
         print("WEBHOOK EVENT RECEIVED")
         print(f"PHOTO FROM: {message.from_user.id}")
         print(f"CHAT ID: {message.chat.id}")
+        print(f"THREAD ID: {message.message_thread_id}")
 
         import time
 
         user_id = message.from_user.id
         now = time.time()
 
+        # =========================
         # RATE LIMIT
+        # =========================
+
         if user_id in last_request_time:
             if now - last_request_time[user_id] < 20:
                 await message.answer(
@@ -95,12 +110,29 @@ async def photo_handler(message: Message):
 
         last_request_time[user_id] = now
 
-        # ACCESS CHECK
-        if message.chat.id != ALLOWED_USER_ID:
-            await message.answer("Нет доступа.")
+        # =========================
+        # ACCESS CONTROL
+        # =========================
+
+        # ГРУППА №1 — разрешено всё
+        if message.chat.id == MAIN_GROUP_ID:
+            pass
+
+        # ГРУППА №2 — только разрешенные темы
+        elif (
+            message.chat.id == TOPIC_GROUP_ID
+            and message.message_thread_id in ALLOWED_TOPICS
+        ):
+            pass
+
+        # ВСЁ ОСТАЛЬНОЕ — ЗАПРЕЩЕНО
+        else:
             return
 
+        # =========================
         # GET PHOTO
+        # =========================
+
         photo = message.photo[-1]
 
         file = await bot.get_file(photo.file_id)
@@ -113,6 +145,10 @@ async def photo_handler(message: Message):
                 image_base64 = base64.b64encode(
                     image_file.read()
                 ).decode("utf-8")
+
+            # =========================
+            # PROMPT
+            # =========================
 
             prompt = """
 Ты анализатор питания.
@@ -132,6 +168,10 @@ async def photo_handler(message: Message):
   "total_calories": 0
 }
 """
+
+            # =========================
+            # OPENROUTER REQUEST
+            # =========================
 
             response = requests.post(
                 url="https://openrouter.ai/api/v1/chat/completions",
@@ -162,7 +202,10 @@ async def photo_handler(message: Message):
                 timeout=120
             )
 
+            # =========================
             # OPENROUTER ERROR
+            # =========================
+
             if response.status_code != 200:
 
                 print("ERROR:")
@@ -173,6 +216,10 @@ async def photo_handler(message: Message):
                 )
 
                 return
+
+            # =========================
+            # PARSE RESPONSE
+            # =========================
 
             result = response.json()
 
@@ -187,6 +234,10 @@ async def photo_handler(message: Message):
 
             print("MODEL RESPONSE:")
             print(text)
+
+            # =========================
+            # JSON PARSE
+            # =========================
 
             try:
 
@@ -218,7 +269,7 @@ async def photo_handler(message: Message):
         )
 
 # =========================
-# DEBUG CHAT ID
+# DEBUG HANDLER
 # =========================
 
 @dp.message()
@@ -226,6 +277,7 @@ async def debug_handler(message: Message):
 
     print("MESSAGE RECEIVED")
     print(f"CHAT ID: {message.chat.id}")
+    print(f"THREAD ID: {message.message_thread_id}")
     print(f"USER ID: {message.from_user.id}")
 
 # =========================
