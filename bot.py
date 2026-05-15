@@ -16,7 +16,7 @@ from aiogram.enums import ParseMode
 from fastapi import FastAPI, Request
 
 import uvicorn
-import requests
+import google.generativeai as genai
 
 # =========================
 # LOAD ENV
@@ -25,8 +25,18 @@ import requests
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")
+
+# =========================
+# GEMINI
+# =========================
+
+genai.configure(api_key=GEMINI_API_KEY)
+
+model = genai.GenerativeModel(
+    "gemini-1.5-flash"
+)
 
 # =========================
 # ACCESS SETTINGS
@@ -108,9 +118,6 @@ def save_calories(message: Message, calories):
 
     calories_stats[key]["calories"] += float(calories)
 
-    print("CALORIES SAVED")
-    print(calories_stats)
-
 # =========================
 # DAILY REPORT TASK
 # =========================
@@ -139,8 +146,6 @@ async def daily_report_loop():
         await asyncio.sleep(sleep_seconds)
 
         report_date = datetime.now().strftime("%d.%m.%Y")
-
-        print("SENDING DAILY REPORTS")
 
         for key, stats in calories_stats.items():
 
@@ -193,6 +198,41 @@ async def start_handler(message: Message):
     )
 
 # =========================
+# GEMINI ANALYZE
+# =========================
+
+def analyze_food(prompt, image_data=None):
+
+    if image_data:
+
+        response = model.generate_content(
+            [
+                prompt,
+                {
+                    "mime_type": "image/jpeg",
+                    "data": image_data
+                }
+            ]
+        )
+
+    else:
+
+        response = model.generate_content(
+            prompt
+        )
+
+    text = response.text
+
+    text = (
+        text
+        .replace("```json", "")
+        .replace("```", "")
+        .strip()
+    )
+
+    return text
+
+# =========================
 # PHOTO HANDLER
 # =========================
 
@@ -204,17 +244,10 @@ async def photo_handler(message: Message):
         if not is_allowed(message):
             return
 
-        print("WEBHOOK EVENT RECEIVED")
-        print(f"PHOTO FROM: {message.from_user.id}")
-        print(f"CHAT ID: {message.chat.id}")
-        print(f"THREAD ID: {message.message_thread_id}")
-
         import time
 
         user_id = message.from_user.id
         now = time.time()
-
-        # RATE LIMIT
 
         if user_id in last_request_time:
 
@@ -228,30 +261,38 @@ async def photo_handler(message: Message):
 
         last_request_time[user_id] = now
 
-        # GET PHOTO
-
         photo = message.photo[-1]
 
         file = await bot.get_file(photo.file_id)
 
         with tempfile.NamedTemporaryFile(suffix=".jpg") as temp:
 
-            await bot.download_file(file.file_path, temp.name)
+            await bot.download_file(
+                file.file_path,
+                temp.name
+            )
 
             with open(temp.name, "rb") as image_file:
 
-                image_base64 = base64.b64encode(
-                    image_file.read()
-                ).decode("utf-8")
+                image_data = image_file.read()
 
             prompt = """
 Ты анализатор питания.
 
-Определи по фото:
+ВНИМАТЕЛЬНО анализируй:
+- бренд
+- размер упаковки
+- текст на упаковке
+- вес если он указан
+- количество продукта
+
+Не преувеличивай размер продукта.
+
+Определи:
 - название продукта или блюда
 - примерный вес продукта в граммах
 - калории на 100 грамм
-- калории именно на весь продукт/порцию
+- калории всего продукта
 
 Ответ строго JSON:
 
@@ -263,70 +304,19 @@ async def photo_handler(message: Message):
 }
 """
 
-            response = requests.post(
-                url="https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "qwen/qwen2.5-vl-72b-instruct",
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": prompt
-                                },
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{image_base64}"
-                                    }
-                                }
-                            ]
-                        }
-                    ]
-                },
-                timeout=120
+            text = analyze_food(
+                prompt,
+                image_data
             )
 
-            if response.status_code != 200:
+            data = json.loads(text)
 
-                print("ERROR:")
-                print(response.text)
-
-                await message.answer(
-                    f"Ошибка OpenRouter:\n{response.text}"
-                )
-
-                return
-
-            result = response.json()
-
-            text = result["choices"][0]["message"]["content"]
-
-            text = (
-                text
-                .replace("```json", "")
-                .replace("```", "")
-                .strip()
+            save_calories(
+                message,
+                data["total_calories"]
             )
 
-            print("MODEL RESPONSE:")
-            print(text)
-
-            try:
-
-                data = json.loads(text)
-
-                save_calories(
-                    message,
-                    data["total_calories"]
-                )
-
-                answer = f"""
+            answer = f"""
 <b>{data['name']}</b>
 
 Вес: ~{data['weight_g']} г
@@ -336,17 +326,10 @@ async def photo_handler(message: Message):
 Калории всего продукта: ~{data['total_calories']} ккал
 """
 
-                await message.answer(answer)
-
-            except Exception:
-
-                traceback.print_exc()
-
-                await message.answer(text)
+            await message.answer(answer)
 
     except Exception as e:
 
-        print("ERROR:")
         traceback.print_exc()
 
         await message.answer(
@@ -367,12 +350,8 @@ async def text_food_handler(message: Message):
 
         text_input = message.text.strip()
 
-        # Игнорируем команды
         if text_input.startswith("/"):
             return
-
-        print("TEXT FOOD MESSAGE:")
-        print(text_input)
 
         prompt = f"""
 Ты анализатор питания.
@@ -399,59 +378,16 @@ async def text_food_handler(message: Message):
 }}
 """
 
-        response = requests.post(
-            url="https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "qwen/qwen2.5-vl-72b-instruct",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
-            },
-            timeout=120
+        text = analyze_food(prompt)
+
+        data = json.loads(text)
+
+        save_calories(
+            message,
+            data["total_calories"]
         )
 
-        if response.status_code != 200:
-
-            print("ERROR:")
-            print(response.text)
-
-            await message.answer(
-                f"Ошибка OpenRouter:\n{response.text}"
-            )
-
-            return
-
-        result = response.json()
-
-        text = result["choices"][0]["message"]["content"]
-
-        text = (
-            text
-            .replace("```json", "")
-            .replace("```", "")
-            .strip()
-        )
-
-        print("MODEL RESPONSE:")
-        print(text)
-
-        try:
-
-            data = json.loads(text)
-
-            save_calories(
-                message,
-                data["total_calories"]
-            )
-
-            answer = f"""
+        answer = f"""
 <b>{data['name']}</b>
 
 Вес: ~{data['weight_g']} г
@@ -461,17 +397,10 @@ async def text_food_handler(message: Message):
 Калории всего продукта: ~{data['total_calories']} ккал
 """
 
-            await message.answer(answer)
-
-        except Exception:
-
-            traceback.print_exc()
-
-            await message.answer(text)
+        await message.answer(answer)
 
     except Exception as e:
 
-        print("ERROR:")
         traceback.print_exc()
 
         await message.answer(
@@ -520,15 +449,7 @@ async def bot_webhook(request: Request):
 @app.on_event("startup")
 async def on_startup():
 
-    print("STARTING WEBHOOK")
-    print(WEBHOOK_URL)
-
     await bot.set_webhook(WEBHOOK_URL)
-
-    info = await bot.get_webhook_info()
-
-    print("WEBHOOK INFO:")
-    print(info)
 
     asyncio.create_task(
         daily_report_loop()
