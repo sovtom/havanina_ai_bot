@@ -33,14 +33,12 @@ RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")
 # =========================
 
 VISION_MODELS = [
-    "google/gemma-3-27b-it:free",
-    "meta-llama/llama-3.2-11b-vision-instruct:free",
-    "qwen/qwen2.5-vl-72b-instruct"
+    "qwen/qwen2.5-vl-72b-instruct",
+    "meta-llama/llama-3.2-11b-vision-instruct:free"
 ]
 
 TEXT_MODELS = [
-    "google/gemma-3-27b-it:free",
-    "meta-llama/llama-3.1-70b-instruct:free"
+    "qwen/qwen2.5-vl-72b-instruct"
 ]
 
 # =========================
