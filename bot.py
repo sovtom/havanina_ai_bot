@@ -38,17 +38,19 @@ VISION_MODELS = [
     "qwen/qwen2.5-vl-72b-instruct"
 ]
 
+TEXT_MODELS = [
+    "google/gemma-3-27b-it:free",
+    "meta-llama/llama-3.1-70b-instruct:free"
+]
+
 # =========================
 # ACCESS SETTINGS
 # =========================
 
-# ГРУППА №1 — бот работает везде
 MAIN_GROUP_ID = -1003923256615
 
-# ГРУППА №2 — бот работает только в двух темах
 TOPIC_GROUP_ID = -1003919465725
 
-# РАЗРЕШЕННЫЕ ТЕМЫ
 ALLOWED_TOPICS = [
     241,
     258
@@ -85,11 +87,9 @@ calories_stats = {}
 
 def is_allowed(message: Message):
 
-    # ГРУППА №1 — бот работает везде
     if message.chat.id == MAIN_GROUP_ID:
         return True
 
-    # ГРУППА №2 — только две темы
     if (
         message.chat.id == TOPIC_GROUP_ID
         and message.message_thread_id in ALLOWED_TOPICS
@@ -198,14 +198,18 @@ async def start_handler(message: Message):
     )
 
 # =========================
-# OPENROUTER ANALYZE
+# OPENROUTER REQUEST
 # =========================
 
-def analyze_with_openrouter(prompt, image_base64=None):
+def make_openrouter_request(
+    models,
+    prompt,
+    image_base64=None
+):
 
     last_error = None
 
-    for model in VISION_MODELS:
+    for model in models:
 
         try:
 
@@ -258,7 +262,6 @@ def analyze_with_openrouter(prompt, image_base64=None):
 
             if response.status_code != 200:
 
-                print("MODEL FAILED:")
                 print(response.text)
 
                 last_error = response.text
@@ -336,54 +339,99 @@ async def photo_handler(message: Message):
                     image_file.read()
                 ).decode("utf-8")
 
-            prompt = """
-Ты анализатор питания.
+            # =========================
+            # STEP 1 — VISION
+            # =========================
+
+            vision_prompt = """
+Ты анализатор еды.
+
+Твоя задача:
+- определить точное название продукта
+- бренд
+- примерный вес продукта
+
+НЕ считай калории.
+НЕ выдумывай БЖУ.
 
 ВНИМАТЕЛЬНО анализируй:
+- текст на упаковке
 - бренд
 - размер упаковки
-- текст на упаковке
 - вес если он указан
-- количество продукта
-
-Не преувеличивай размер продукта.
-
-Определи:
-- название продукта или блюда
-- примерный вес продукта в граммах
-- калории на 100 грамм
-- калории всего продукта
 
 Ответ строго JSON:
 
 {
   "name": "",
-  "weight_g": 0,
-  "calories_per_100g": 0,
-  "total_calories": 0
+  "weight_g": 0
 }
 """
 
-            text = analyze_with_openrouter(
-                prompt,
+            vision_text = make_openrouter_request(
+                VISION_MODELS,
+                vision_prompt,
                 image_base64
             )
 
-            data = json.loads(text)
+            vision_data = json.loads(vision_text)
+
+            name = vision_data["name"]
+            weight = vision_data["weight_g"]
+
+            # =========================
+            # STEP 2 — NUTRITION
+            # =========================
+
+            nutrition_prompt = f"""
+Продукт: {name}
+Вес: {weight} г
+
+Определи:
+- калории на 100 г
+- калории всего продукта
+
+Ответ строго JSON:
+
+{{
+  "calories_per_100g": 0,
+  "total_calories": 0
+}}
+"""
+
+            nutrition_text = make_openrouter_request(
+                TEXT_MODELS,
+                nutrition_prompt
+            )
+
+            nutrition_data = json.loads(
+                nutrition_text
+            )
+
+            final_data = {
+                "name": name,
+                "weight_g": weight,
+                "calories_per_100g":
+                    nutrition_data["calories_per_100g"],
+                "total_calories":
+                    nutrition_data["total_calories"]
+            }
 
             save_calories(
                 message,
-                data["total_calories"]
+                final_data["total_calories"]
             )
 
             answer = f"""
-<b>{data['name']}</b>
+<b>{final_data['name']}</b>
 
-Вес: ~{data['weight_g']} г
+Вес: ~{final_data['weight_g']} г
 
-Калории на 100 г: ~{data['calories_per_100g']} ккал
+Калории на 100 г:
+~{final_data['calories_per_100g']} ккал
 
-Калории всего продукта: ~{data['total_calories']} ккал
+Калории всего продукта:
+~{final_data['total_calories']} ккал
 """
 
             await message.answer(answer)
@@ -413,20 +461,16 @@ async def text_food_handler(message: Message):
         if text_input.startswith("/"):
             return
 
-        prompt = f"""
-Ты анализатор питания.
-
-Пользователь написал еду текстом.
-
-Нужно определить:
-- название продукта
-- примерный вес в граммах
-- калории на 100 грамм
-- калории всего продукта
-
-Сообщение пользователя:
+        nutrition_prompt = f"""
+Пользователь написал:
 
 {text_input}
+
+Определи:
+- название продукта
+- примерный вес
+- калории на 100 г
+- калории всего продукта
 
 Ответ строго JSON:
 
@@ -438,9 +482,14 @@ async def text_food_handler(message: Message):
 }}
 """
 
-        text = analyze_with_openrouter(prompt)
+        nutrition_text = make_openrouter_request(
+            TEXT_MODELS,
+            nutrition_prompt
+        )
 
-        data = json.loads(text)
+        data = json.loads(
+            nutrition_text
+        )
 
         save_calories(
             message,
@@ -452,9 +501,11 @@ async def text_food_handler(message: Message):
 
 Вес: ~{data['weight_g']} г
 
-Калории на 100 г: ~{data['calories_per_100g']} ккал
+Калории на 100 г:
+~{data['calories_per_100g']} ккал
 
-Калории всего продукта: ~{data['total_calories']} ккал
+Калории всего продукта:
+~{data['total_calories']} ккал
 """
 
         await message.answer(answer)
