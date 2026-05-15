@@ -316,7 +316,10 @@ def get_nutrition_data(product_name, weight_g):
                 timeout=30
             )
 
-            data = response.json()
+            try:
+                data = response.json()
+            except Exception:
+                continue
 
             products = data.get("products", [])
 
@@ -369,7 +372,7 @@ def get_nutrition_data(product_name, weight_g):
         return None
 
 # =========================
-# FALLBACK OCR NUTRITION
+# OCR NUTRITION FALLBACK
 # =========================
 
 def extract_nutrition_from_label(
@@ -381,21 +384,21 @@ def extract_nutrition_from_label(
     prompt = f"""
 На фото упаковка продукта.
 
-Нужно ВНИМАТЕЛЬНО прочитать этикетку.
-
 Продукт:
 {product_name}
 
 Вес:
 {weight_g} г
 
-Найди:
-- калории на 100 г
+Нужно:
+1. Найти калории на 100 г
+2. Если калории указаны на порцию —
+   пересчитать на 100 г и на весь продукт
+3. Ответ ТОЛЬКО JSON
+4. Без markdown
+5. Без пояснений
 
-Если есть калории на порцию —
-пересчитай на весь продукт.
-
-Ответ строго JSON:
+Формат:
 
 {{
   "calories_per_100g": 0,
@@ -408,14 +411,49 @@ def extract_nutrition_from_label(
         image_base64
     )
 
-    text = (
-        text
-        .replace("```json", "")
-        .replace("```", "")
-        .strip()
+    print("RAW OCR RESPONSE:")
+    print(text)
+
+    text = text.strip()
+
+    if "```json" in text:
+        text = text.split("```json")[1]
+
+    if "```" in text:
+        text = text.split("```")[0]
+
+    text = text.strip()
+
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start == -1 or end == -1:
+
+        raise Exception(
+            "OCR JSON NOT FOUND"
+        )
+
+    text = text[start:end + 1]
+
+    print("CLEAN OCR JSON:")
+    print(text)
+
+    data = json.loads(text)
+
+    calories_per_100g = round(
+        float(data["calories_per_100g"])
     )
 
-    return json.loads(text)
+    total_calories = round(
+        float(data["total_calories"])
+    )
+
+    return {
+        "calories_per_100g":
+            calories_per_100g,
+        "total_calories":
+            total_calories
+    }
 
 # =========================
 # PHOTO HANDLER
@@ -509,10 +547,6 @@ async def photo_handler(message: Message):
                 name,
                 weight
             )
-
-            # =========================
-            # FALLBACK TO LABEL OCR
-            # =========================
 
             if not nutrition:
 
