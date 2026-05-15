@@ -35,7 +35,7 @@ RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")
 genai.configure(api_key=GEMINI_API_KEY)
 
 model = genai.GenerativeModel(
-    "gemini-1.5-flash-latest"
+    "models/gemini-1.5-flash"
 )
 
 # =========================
