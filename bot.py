@@ -16,7 +16,7 @@ from aiogram.enums import ParseMode
 from fastapi import FastAPI, Request
 
 import uvicorn
-import google.generativeai as genai
+import requests
 
 # =========================
 # LOAD ENV
@@ -25,18 +25,18 @@ import google.generativeai as genai
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")
 
 # =========================
-# GEMINI
+# MODELS
 # =========================
 
-genai.configure(api_key=GEMINI_API_KEY)
-
-model = genai.GenerativeModel(
-    "gemini-2.0-flash"
-)
+VISION_MODELS = [
+    "google/gemma-3-27b-it:free",
+    "meta-llama/llama-3.2-11b-vision-instruct:free",
+    "qwen/qwen2.5-vl-72b-instruct"
+]
 
 # =========================
 # ACCESS SETTINGS
@@ -85,7 +85,7 @@ calories_stats = {}
 
 def is_allowed(message: Message):
 
-    # ГРУППА №1 — разрешено всё
+    # ГРУППА №1 — бот работает везде
     if message.chat.id == MAIN_GROUP_ID:
         return True
 
@@ -198,39 +198,97 @@ async def start_handler(message: Message):
     )
 
 # =========================
-# GEMINI ANALYZE
+# OPENROUTER ANALYZE
 # =========================
 
-def analyze_food(prompt, image_data=None):
+def analyze_with_openrouter(prompt, image_base64=None):
 
-    if image_data:
+    last_error = None
 
-        response = model.generate_content(
-            [
-                prompt,
-                {
-                    "mime_type": "image/jpeg",
-                    "data": image_data
+    for model in VISION_MODELS:
+
+        try:
+
+            print(f"TRY MODEL: {model}")
+
+            if image_base64:
+
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": prompt
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{image_base64}"
+                                    }
+                                }
+                            ]
+                        }
+                    ]
                 }
-            ]
-        )
 
-    else:
+            else:
 
-        response = model.generate_content(
-            prompt
-        )
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ]
+                }
 
-    text = response.text
+            response = requests.post(
+                url="https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json=payload,
+                timeout=120
+            )
 
-    text = (
-        text
-        .replace("```json", "")
-        .replace("```", "")
-        .strip()
+            if response.status_code != 200:
+
+                print("MODEL FAILED:")
+                print(response.text)
+
+                last_error = response.text
+
+                continue
+
+            result = response.json()
+
+            text = result["choices"][0]["message"]["content"]
+
+            text = (
+                text
+                .replace("```json", "")
+                .replace("```", "")
+                .strip()
+            )
+
+            print(f"SUCCESS MODEL: {model}")
+
+            return text
+
+        except Exception as e:
+
+            traceback.print_exc()
+
+            last_error = str(e)
+
+    raise Exception(
+        f"Все модели недоступны.\n\n{last_error}"
     )
-
-    return text
 
 # =========================
 # PHOTO HANDLER
@@ -274,7 +332,9 @@ async def photo_handler(message: Message):
 
             with open(temp.name, "rb") as image_file:
 
-                image_data = image_file.read()
+                image_base64 = base64.b64encode(
+                    image_file.read()
+                ).decode("utf-8")
 
             prompt = """
 Ты анализатор питания.
@@ -304,9 +364,9 @@ async def photo_handler(message: Message):
 }
 """
 
-            text = analyze_food(
+            text = analyze_with_openrouter(
                 prompt,
-                image_data
+                image_base64
             )
 
             data = json.loads(text)
@@ -378,7 +438,7 @@ async def text_food_handler(message: Message):
 }}
 """
 
-        text = analyze_food(prompt)
+        text = analyze_with_openrouter(prompt)
 
         data = json.loads(text)
 
