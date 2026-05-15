@@ -1,6 +1,3 @@
-# Полный обновленный bot.py
-
-````python
 import os
 import json
 import base64
@@ -70,16 +67,49 @@ last_request_time = {}
 # CALORIES STORAGE
 # =========================
 
-# Формат:
-# {
-#   "chatid_threadid": {
-#       "calories": 1234,
-#       "chat_id": -100123,
-#       "thread_id": 111
-#   }
-# }
-
 calories_stats = {}
+
+# =========================
+# ACCESS CHECK
+# =========================
+
+def is_allowed(message: Message):
+
+    # ГРУППА №1 — разрешено всё
+    if message.chat.id == MAIN_GROUP_ID:
+        return True
+
+    # ГРУППА №2 — только две темы
+    if (
+        message.chat.id == TOPIC_GROUP_ID
+        and message.message_thread_id in ALLOWED_TOPICS
+    ):
+        return True
+
+    return False
+
+# =========================
+# SAVE CALORIES
+# =========================
+
+def save_calories(message: Message, calories):
+
+    thread_id = message.message_thread_id
+
+    key = f"{message.chat.id}_{thread_id}"
+
+    if key not in calories_stats:
+
+        calories_stats[key] = {
+            "calories": 0,
+            "chat_id": message.chat.id,
+            "thread_id": thread_id
+        }
+
+    calories_stats[key]["calories"] += float(calories)
+
+    print("CALORIES SAVED")
+    print(calories_stats)
 
 # =========================
 # DAILY REPORT TASK
@@ -91,7 +121,6 @@ async def daily_report_loop():
 
         now = datetime.now()
 
-        # Ждем до 00:00
         next_midnight = now.replace(
             hour=0,
             minute=0,
@@ -100,7 +129,9 @@ async def daily_report_loop():
         )
 
         if next_midnight <= now:
+
             from datetime import timedelta
+
             next_midnight += timedelta(days=1)
 
         sleep_seconds = (next_midnight - now).total_seconds()
@@ -122,7 +153,6 @@ async def daily_report_loop():
                     f"за {report_date}"
                 )
 
-                # Если это тема
                 if stats["thread_id"]:
 
                     await bot.send_message(
@@ -131,7 +161,6 @@ async def daily_report_loop():
                         message_thread_id=stats["thread_id"]
                     )
 
-                # Если обычная группа
                 else:
 
                     await bot.send_message(
@@ -140,9 +169,9 @@ async def daily_report_loop():
                     )
 
             except Exception:
+
                 traceback.print_exc()
 
-        # Сбрасываем статистику после отправки
         calories_stats.clear()
 
 # =========================
@@ -152,14 +181,15 @@ async def daily_report_loop():
 @dp.message(F.text == "/start")
 async def start_handler(message: Message):
 
-    print("WEBHOOK EVENT RECEIVED")
-    print("TEXT MESSAGE: /start")
-    print(f"CHAT ID: {message.chat.id}")
-    print(f"THREAD ID: {message.message_thread_id}")
-    print(f"USER ID: {message.from_user.id}")
+    if not is_allowed(message):
+        return
 
     await message.answer(
-        "Бот работает.\n\nОтправь фото еды."
+        "Бот работает.\n\n"
+        "Можно отправить:\n"
+        "- фото еды\n"
+        "- или текст типа:\n"
+        "гречка 250г"
     )
 
 # =========================
@@ -171,6 +201,9 @@ async def photo_handler(message: Message):
 
     try:
 
+        if not is_allowed(message):
+            return
+
         print("WEBHOOK EVENT RECEIVED")
         print(f"PHOTO FROM: {message.from_user.id}")
         print(f"CHAT ID: {message.chat.id}")
@@ -181,41 +214,21 @@ async def photo_handler(message: Message):
         user_id = message.from_user.id
         now = time.time()
 
-        # =========================
         # RATE LIMIT
-        # =========================
 
         if user_id in last_request_time:
+
             if now - last_request_time[user_id] < 20:
+
                 await message.answer(
                     "Подожди 20 секунд перед следующим фото."
                 )
+
                 return
 
         last_request_time[user_id] = now
 
-        # =========================
-        # ACCESS CONTROL
-        # =========================
-
-        # ГРУППА №1 — разрешено всё
-        if message.chat.id == MAIN_GROUP_ID:
-            pass
-
-        # ГРУППА №2 — только две темы
-        elif (
-            message.chat.id == TOPIC_GROUP_ID
-            and message.message_thread_id in ALLOWED_TOPICS
-        ):
-            pass
-
-        # ВСЁ ОСТАЛЬНОЕ — ЗАПРЕЩЕНО
-        else:
-            return
-
-        # =========================
         # GET PHOTO
-        # =========================
 
         photo = message.photo[-1]
 
@@ -226,13 +239,10 @@ async def photo_handler(message: Message):
             await bot.download_file(file.file_path, temp.name)
 
             with open(temp.name, "rb") as image_file:
+
                 image_base64 = base64.b64encode(
                     image_file.read()
                 ).decode("utf-8")
-
-            # =========================
-            # PROMPT
-            # =========================
 
             prompt = """
 Ты анализатор питания.
@@ -252,10 +262,6 @@ async def photo_handler(message: Message):
   "total_calories": 0
 }
 """
-
-            # =========================
-            # OPENROUTER REQUEST
-            # =========================
 
             response = requests.post(
                 url="https://openrouter.ai/api/v1/chat/completions",
@@ -286,10 +292,6 @@ async def photo_handler(message: Message):
                 timeout=120
             )
 
-            # =========================
-            # OPENROUTER ERROR
-            # =========================
-
             if response.status_code != 200:
 
                 print("ERROR:")
@@ -300,10 +302,6 @@ async def photo_handler(message: Message):
                 )
 
                 return
-
-            # =========================
-            # PARSE RESPONSE
-            # =========================
 
             result = response.json()
 
@@ -319,39 +317,14 @@ async def photo_handler(message: Message):
             print("MODEL RESPONSE:")
             print(text)
 
-            # =========================
-            # JSON PARSE
-            # =========================
-
             try:
 
                 data = json.loads(text)
 
-                # =========================
-                # SAVE CALORIES
-                # =========================
-
-                thread_id = message.message_thread_id
-
-                key = f"{message.chat.id}_{thread_id}"
-
-                if key not in calories_stats:
-                    calories_stats[key] = {
-                        "calories": 0,
-                        "chat_id": message.chat.id,
-                        "thread_id": thread_id
-                    }
-
-                calories_stats[key]["calories"] += float(
+                save_calories(
+                    message,
                     data["total_calories"]
                 )
-
-                print("CALORIES SAVED")
-                print(calories_stats)
-
-                # =========================
-                # ANSWER
-                # =========================
 
                 answer = f"""
 <b>{data['name']}</b>
@@ -381,16 +354,129 @@ async def photo_handler(message: Message):
         )
 
 # =========================
-# DEBUG HANDLER
+# TEXT FOOD HANDLER
 # =========================
 
-@dp.message()
-async def debug_handler(message: Message):
+@dp.message(F.text)
+async def text_food_handler(message: Message):
 
-    print("MESSAGE RECEIVED")
-    print(f"CHAT ID: {message.chat.id}")
-    print(f"THREAD ID: {message.message_thread_id}")
-    print(f"USER ID: {message.from_user.id}")
+    try:
+
+        if not is_allowed(message):
+            return
+
+        text_input = message.text.strip()
+
+        # Игнорируем команды
+        if text_input.startswith("/"):
+            return
+
+        print("TEXT FOOD MESSAGE:")
+        print(text_input)
+
+        prompt = f"""
+Ты анализатор питания.
+
+Пользователь написал еду текстом.
+
+Нужно определить:
+- название продукта
+- примерный вес в граммах
+- калории на 100 грамм
+- калории всего продукта
+
+Сообщение пользователя:
+
+{text_input}
+
+Ответ строго JSON:
+
+{{
+  "name": "",
+  "weight_g": 0,
+  "calories_per_100g": 0,
+  "total_calories": 0
+}}
+"""
+
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "qwen/qwen2.5-vl-72b-instruct",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            },
+            timeout=120
+        )
+
+        if response.status_code != 200:
+
+            print("ERROR:")
+            print(response.text)
+
+            await message.answer(
+                f"Ошибка OpenRouter:\n{response.text}"
+            )
+
+            return
+
+        result = response.json()
+
+        text = result["choices"][0]["message"]["content"]
+
+        text = (
+            text
+            .replace("```json", "")
+            .replace("```", "")
+            .strip()
+        )
+
+        print("MODEL RESPONSE:")
+        print(text)
+
+        try:
+
+            data = json.loads(text)
+
+            save_calories(
+                message,
+                data["total_calories"]
+            )
+
+            answer = f"""
+<b>{data['name']}</b>
+
+Вес: ~{data['weight_g']} г
+
+Калории на 100 г: ~{data['calories_per_100g']} ккал
+
+Калории всего продукта: ~{data['total_calories']} ккал
+"""
+
+            await message.answer(answer)
+
+        except Exception:
+
+            traceback.print_exc()
+
+            await message.answer(text)
+
+    except Exception as e:
+
+        print("ERROR:")
+        traceback.print_exc()
+
+        await message.answer(
+            f"Ошибка:\n{str(e)}"
+        )
 
 # =========================
 # FASTAPI
@@ -444,8 +530,9 @@ async def on_startup():
     print("WEBHOOK INFO:")
     print(info)
 
-    # ЗАПУСК ЕЖЕДНЕВНОГО ОТЧЕТА
-    asyncio.create_task(daily_report_loop())
+    asyncio.create_task(
+        daily_report_loop()
+    )
 
 # =========================
 # SHUTDOWN
@@ -468,4 +555,3 @@ if __name__ == "__main__":
         port=8080,
         reload=False
     )
-````
