@@ -190,11 +190,10 @@ async def photo_handler(message: Message):
 <b>{data['name']}</b>
 
 Вес: ~{data['weight_g']} г
-Калории: ~{data['calories']} ккал
 
-Б: {data['protein']} г
-Ж: {data['fat']} г
-У: {data['carbs']} г
+Калории на 100 г: ~{data['calories_per_100g']} ккал
+
+Калории всего продукта: ~{data['total_calories']} ккал
 """
 
                 await message.answer(answer)
@@ -211,6 +210,21 @@ async def photo_handler(message: Message):
         await message.answer(
             f"Ошибка:\n{str(e)}"
         )
+
+# =========================
+# DEBUG CHAT ID
+# =========================
+
+@dp.message()
+async def debug_handler(message: Message):
+
+    print("MESSAGE RECEIVED")
+    print(f"CHAT ID: {message.chat.id}")
+    print(f"USER ID: {message.from_user.id}")
+
+    await message.answer(
+        f"CHAT ID:\n{message.chat.id}"
+    )
 
 # =========================
 # FASTAPI
