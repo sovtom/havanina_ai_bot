@@ -31,15 +31,15 @@ RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")
 # =========================
 
 # ГРУППА №1 — бот работает везде
-MAIN_GROUP_ID = -1003919465725
+MAIN_GROUP_ID = -1003923256615
 
-# ГРУППА №2 — бот работает только в темах
-TOPIC_GROUP_ID = -1000000000000
+# ГРУППА №2 — бот работает только в двух темах
+TOPIC_GROUP_ID = -1003919465725
 
 # РАЗРЕШЕННЫЕ ТЕМЫ
 ALLOWED_TOPICS = [
-    123,
-    456
+    241,
+    258
 ]
 
 # =========================
@@ -118,7 +118,7 @@ async def photo_handler(message: Message):
         if message.chat.id == MAIN_GROUP_ID:
             pass
 
-        # ГРУППА №2 — только разрешенные темы
+        # ГРУППА №2 — только две темы
         elif (
             message.chat.id == TOPIC_GROUP_ID
             and message.message_thread_id in ALLOWED_TOPICS
