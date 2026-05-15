@@ -26,6 +26,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")
 
+# ID ГРУППЫ
 ALLOWED_USER_ID = -1003923256615
 
 # =========================
@@ -56,6 +57,7 @@ async def start_handler(message: Message):
 
     print("WEBHOOK EVENT RECEIVED")
     print("TEXT MESSAGE: /start")
+    print(f"CHAT ID: {message.chat.id}")
     print(f"USER ID: {message.from_user.id}")
 
     await message.answer(
@@ -73,6 +75,7 @@ async def photo_handler(message: Message):
 
         print("WEBHOOK EVENT RECEIVED")
         print(f"PHOTO FROM: {message.from_user.id}")
+        print(f"CHAT ID: {message.chat.id}")
 
         import time
 
@@ -90,7 +93,7 @@ async def photo_handler(message: Message):
         last_request_time[user_id] = now
 
         # ACCESS CHECK
-        if user_id != ALLOWED_USER_ID:
+        if message.chat.id != ALLOWED_USER_ID:
             await message.answer("Нет доступа.")
             return
 
@@ -221,10 +224,6 @@ async def debug_handler(message: Message):
     print("MESSAGE RECEIVED")
     print(f"CHAT ID: {message.chat.id}")
     print(f"USER ID: {message.from_user.id}")
-
-    await message.answer(
-        f"CHAT ID:\n{message.chat.id}"
-    )
 
 # =========================
 # FASTAPI
