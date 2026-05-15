@@ -5,6 +5,7 @@ import tempfile
 import traceback
 import asyncio
 from datetime import datetime
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 
@@ -35,10 +36,6 @@ RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")
 VISION_MODELS = [
     "qwen/qwen2.5-vl-72b-instruct",
     "meta-llama/llama-3.2-11b-vision-instruct:free"
-]
-
-TEXT_MODELS = [
-    "qwen/qwen2.5-vl-72b-instruct"
 ]
 
 # =========================
@@ -199,54 +196,36 @@ async def start_handler(message: Message):
 # OPENROUTER REQUEST
 # =========================
 
-def make_openrouter_request(
-    models,
-    prompt,
-    image_base64=None
-):
+def analyze_product(prompt, image_base64=None):
 
     last_error = None
 
-    for model in models:
+    for model in VISION_MODELS:
 
         try:
 
             print(f"TRY MODEL: {model}")
 
-            if image_base64:
-
-                payload = {
-                    "model": model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": prompt
-                                },
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{image_base64}"
-                                    }
+            payload = {
+                "model": model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": prompt
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_base64}"
                                 }
-                            ]
-                        }
-                    ]
-                }
-
-            else:
-
-                payload = {
-                    "model": model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ]
-                }
+                            }
+                        ]
+                    }
+                ]
+            }
 
             response = requests.post(
                 url="https://openrouter.ai/api/v1/chat/completions",
@@ -277,8 +256,6 @@ def make_openrouter_request(
                 .strip()
             )
 
-            print(f"SUCCESS MODEL: {model}")
-
             return text
 
         except Exception as e:
@@ -290,6 +267,72 @@ def make_openrouter_request(
     raise Exception(
         f"Все модели недоступны.\n\n{last_error}"
     )
+
+# =========================
+# OPEN FOOD FACTS
+# =========================
+
+def get_nutrition_data(product_name, weight_g):
+
+    try:
+
+        encoded = quote(product_name)
+
+        url = (
+            f"https://world.openfoodfacts.org/"
+            f"cgi/search.pl"
+            f"?search_terms={encoded}"
+            f"&search_simple=1"
+            f"&action=process"
+            f"&json=1"
+        )
+
+        response = requests.get(
+            url,
+            timeout=30
+        )
+
+        data = response.json()
+
+        products = data.get("products", [])
+
+        if not products:
+
+            return None
+
+        product = products[0]
+
+        nutriments = product.get(
+            "nutriments",
+            {}
+        )
+
+        calories_100g = nutriments.get(
+            "energy-kcal_100g"
+        )
+
+        if calories_100g is None:
+
+            return None
+
+        calories_100g = float(calories_100g)
+
+        total_calories = round(
+            calories_100g * weight_g / 100
+        )
+
+        return {
+            "calories_per_100g":
+                round(calories_100g),
+            "total_calories":
+                total_calories
+        }
+
+    except Exception:
+
+        traceback.print_exc()
+
+        return None
 
 # =========================
 # PHOTO HANDLER
@@ -313,7 +356,8 @@ async def photo_handler(message: Message):
             if now - last_request_time[user_id] < 20:
 
                 await message.answer(
-                    "Подожди 20 секунд перед следующим фото."
+                    "Подожди 20 секунд "
+                    "перед следующим фото."
                 )
 
                 return
@@ -324,24 +368,29 @@ async def photo_handler(message: Message):
 
         file = await bot.get_file(photo.file_id)
 
-        with tempfile.NamedTemporaryFile(suffix=".jpg") as temp:
+        with tempfile.NamedTemporaryFile(
+            suffix=".jpg"
+        ) as temp:
 
             await bot.download_file(
                 file.file_path,
                 temp.name
             )
 
-            with open(temp.name, "rb") as image_file:
+            with open(
+                temp.name,
+                "rb"
+            ) as image_file:
 
                 image_base64 = base64.b64encode(
                     image_file.read()
                 ).decode("utf-8")
 
             # =========================
-            # STEP 1 — VISION
+            # PRODUCT DETECTION
             # =========================
 
-            vision_prompt = """
+            prompt = """
 Ты анализатор еды.
 
 Твоя задача:
@@ -350,7 +399,6 @@ async def photo_handler(message: Message):
 - примерный вес продукта
 
 НЕ считай калории.
-НЕ выдумывай БЖУ.
 
 ВНИМАТЕЛЬНО анализируй:
 - текст на упаковке
@@ -366,70 +414,60 @@ async def photo_handler(message: Message):
 }
 """
 
-            vision_text = make_openrouter_request(
-                VISION_MODELS,
-                vision_prompt,
+            text = analyze_product(
+                prompt,
                 image_base64
             )
 
-            vision_data = json.loads(vision_text)
+            print(text)
 
-            name = vision_data["name"]
-            weight = vision_data["weight_g"]
+            data = json.loads(text)
+
+            name = data["name"]
+            weight = float(data["weight_g"])
 
             # =========================
-            # STEP 2 — NUTRITION
+            # NUTRITION DATABASE
             # =========================
 
-            nutrition_prompt = f"""
-Продукт: {name}
-Вес: {weight} г
-
-Определи:
-- калории на 100 г
-- калории всего продукта
-
-Ответ строго JSON:
-
-{{
-  "calories_per_100g": 0,
-  "total_calories": 0
-}}
-"""
-
-            nutrition_text = make_openrouter_request(
-                TEXT_MODELS,
-                nutrition_prompt
+            nutrition = get_nutrition_data(
+                name,
+                weight
             )
 
-            nutrition_data = json.loads(
-                nutrition_text
-            )
+            # fallback если не нашли
+            if not nutrition:
 
-            final_data = {
-                "name": name,
-                "weight_g": weight,
-                "calories_per_100g":
-                    nutrition_data["calories_per_100g"],
-                "total_calories":
-                    nutrition_data["total_calories"]
-            }
+                nutrition = {
+                    "calories_per_100g": "?",
+                    "total_calories": "?"
+                }
 
-            save_calories(
-                message,
-                final_data["total_calories"]
-            )
+            # =========================
+            # SAVE CALORIES
+            # =========================
+
+            if nutrition["total_calories"] != "?":
+
+                save_calories(
+                    message,
+                    nutrition["total_calories"]
+                )
+
+            # =========================
+            # ANSWER
+            # =========================
 
             answer = f"""
-<b>{final_data['name']}</b>
+<b>{name}</b>
 
-Вес: ~{final_data['weight_g']} г
+Вес: ~{round(weight)} г
 
 Калории на 100 г:
-~{final_data['calories_per_100g']} ккал
+~{nutrition['calories_per_100g']} ккал
 
 Калории всего продукта:
-~{final_data['total_calories']} ккал
+~{nutrition['total_calories']} ккал
 """
 
             await message.answer(answer)
@@ -459,7 +497,7 @@ async def text_food_handler(message: Message):
         if text_input.startswith("/"):
             return
 
-        nutrition_prompt = f"""
+        prompt = f"""
 Пользователь написал:
 
 {text_input}
@@ -467,43 +505,56 @@ async def text_food_handler(message: Message):
 Определи:
 - название продукта
 - примерный вес
-- калории на 100 г
-- калории всего продукта
+
+НЕ считай калории.
 
 Ответ строго JSON:
 
 {{
   "name": "",
-  "weight_g": 0,
-  "calories_per_100g": 0,
-  "total_calories": 0
+  "weight_g": 0
 }}
 """
 
-        nutrition_text = make_openrouter_request(
-            TEXT_MODELS,
-            nutrition_prompt
+        text = analyze_product(
+            prompt,
+            None
         )
 
-        data = json.loads(
-            nutrition_text
+        data = json.loads(text)
+
+        name = data["name"]
+        weight = float(data["weight_g"])
+
+        nutrition = get_nutrition_data(
+            name,
+            weight
         )
 
-        save_calories(
-            message,
-            data["total_calories"]
-        )
+        if not nutrition:
+
+            nutrition = {
+                "calories_per_100g": "?",
+                "total_calories": "?"
+            }
+
+        if nutrition["total_calories"] != "?":
+
+            save_calories(
+                message,
+                nutrition["total_calories"]
+            )
 
         answer = f"""
-<b>{data['name']}</b>
+<b>{name}</b>
 
-Вес: ~{data['weight_g']} г
+Вес: ~{round(weight)} г
 
 Калории на 100 г:
-~{data['calories_per_100g']} ккал
+~{nutrition['calories_per_100g']} ккал
 
 Калории всего продукта:
-~{data['total_calories']} ккал
+~{nutrition['total_calories']} ккал
 """
 
         await message.answer(answer)
@@ -558,7 +609,9 @@ async def bot_webhook(request: Request):
 @app.on_event("startup")
 async def on_startup():
 
-    await bot.set_webhook(WEBHOOK_URL)
+    await bot.set_webhook(
+        WEBHOOK_URL
+    )
 
     asyncio.create_task(
         daily_report_loop()
