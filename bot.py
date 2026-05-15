@@ -206,26 +206,40 @@ def analyze_product(prompt, image_base64=None):
 
             print(f"TRY MODEL: {model}")
 
-            payload = {
-                "model": model,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": prompt
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{image_base64}"
+            if image_base64:
+
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": prompt
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{image_base64}"
+                                    }
                                 }
-                            }
-                        ]
-                    }
-                ]
-            }
+                            ]
+                        }
+                    ]
+                }
+
+            else:
+
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ]
+                }
 
             response = requests.post(
                 url="https://openrouter.ai/api/v1/chat/completions",
@@ -276,57 +290,77 @@ def get_nutrition_data(product_name, weight_g):
 
     try:
 
-        encoded = quote(product_name)
+        search_variants = [
+            product_name,
+            product_name.lower(),
+            product_name.split(" ")[0]
+        ]
 
-        url = (
-            f"https://world.openfoodfacts.org/"
-            f"cgi/search.pl"
-            f"?search_terms={encoded}"
-            f"&search_simple=1"
-            f"&action=process"
-            f"&json=1"
-        )
+        for search_query in search_variants:
 
-        response = requests.get(
-            url,
-            timeout=30
-        )
+            print(f"SEARCH FOOD: {search_query}")
 
-        data = response.json()
+            encoded = quote(search_query)
 
-        products = data.get("products", [])
+            url = (
+                f"https://world.openfoodfacts.org/"
+                f"cgi/search.pl"
+                f"?search_terms={encoded}"
+                f"&search_simple=1"
+                f"&action=process"
+                f"&json=1"
+            )
 
-        if not products:
+            response = requests.get(
+                url,
+                timeout=30
+            )
 
-            return None
+            data = response.json()
 
-        product = products[0]
+            products = data.get("products", [])
 
-        nutriments = product.get(
-            "nutriments",
-            {}
-        )
+            print(f"FOUND PRODUCTS: {len(products)}")
 
-        calories_100g = nutriments.get(
-            "energy-kcal_100g"
-        )
+            for product in products:
 
-        if calories_100g is None:
+                nutriments = product.get(
+                    "nutriments",
+                    {}
+                )
 
-            return None
+                calories_100g = nutriments.get(
+                    "energy-kcal_100g"
+                )
 
-        calories_100g = float(calories_100g)
+                if calories_100g is None:
+                    continue
 
-        total_calories = round(
-            calories_100g * weight_g / 100
-        )
+                try:
 
-        return {
-            "calories_per_100g":
-                round(calories_100g),
-            "total_calories":
-                total_calories
-        }
+                    calories_100g = float(
+                        calories_100g
+                    )
+
+                except Exception:
+                    continue
+
+                total_calories = round(
+                    calories_100g * weight_g / 100
+                )
+
+                print("NUTRITION FOUND")
+
+                return {
+                    "calories_per_100g":
+                        round(calories_100g),
+                    "total_calories":
+                        total_calories
+                }
+
+        print("NO NUTRITION FOUND")
+
+        return None
 
     except Exception:
 
@@ -386,10 +420,6 @@ async def photo_handler(message: Message):
                     image_file.read()
                 ).decode("utf-8")
 
-            # =========================
-            # PRODUCT DETECTION
-            # =========================
-
             prompt = """
 Ты анализатор еды.
 
@@ -426,16 +456,11 @@ async def photo_handler(message: Message):
             name = data["name"]
             weight = float(data["weight_g"])
 
-            # =========================
-            # NUTRITION DATABASE
-            # =========================
-
             nutrition = get_nutrition_data(
                 name,
                 weight
             )
 
-            # fallback если не нашли
             if not nutrition:
 
                 nutrition = {
@@ -443,20 +468,12 @@ async def photo_handler(message: Message):
                     "total_calories": "?"
                 }
 
-            # =========================
-            # SAVE CALORIES
-            # =========================
-
             if nutrition["total_calories"] != "?":
 
                 save_calories(
                     message,
                     nutrition["total_calories"]
                 )
-
-            # =========================
-            # ANSWER
-            # =========================
 
             answer = f"""
 <b>{name}</b>
@@ -497,34 +514,21 @@ async def text_food_handler(message: Message):
         if text_input.startswith("/"):
             return
 
-        prompt = f"""
-Пользователь написал:
+        name = text_input
+        weight = 100
 
-{text_input}
+        import re
 
-Определи:
-- название продукта
-- примерный вес
-
-НЕ считай калории.
-
-Ответ строго JSON:
-
-{{
-  "name": "",
-  "weight_g": 0
-}}
-"""
-
-        text = analyze_product(
-            prompt,
-            None
+        weight_match = re.search(
+            r"(\\d+)\\s*г",
+            text_input.lower()
         )
 
-        data = json.loads(text)
+        if weight_match:
 
-        name = data["name"]
-        weight = float(data["weight_g"])
+            weight = float(
+                weight_match.group(1)
+            )
 
         nutrition = get_nutrition_data(
             name,
