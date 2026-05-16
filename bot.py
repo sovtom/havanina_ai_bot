@@ -119,39 +119,55 @@ def save_calories(message: Message, calories):
 
 async def daily_report_loop():
 
+    from datetime import timedelta
+
     while True:
 
         now = datetime.now()
 
-        next_midnight = now.replace(
+        next_midnight = (
+            now + timedelta(days=1)
+        ).replace(
             hour=0,
             minute=0,
             second=0,
             microsecond=0
         )
 
-        if next_midnight <= now:
+        sleep_seconds = (
+            next_midnight - now
+        ).total_seconds()
 
-            from datetime import timedelta
+        print(
+            f"SLEEP UNTIL MIDNIGHT: "
+            f"{sleep_seconds}"
+        )
 
-            next_midnight += timedelta(days=1)
+        await asyncio.sleep(
+            sleep_seconds
+        )
 
-        sleep_seconds = (next_midnight - now).total_seconds()
+        report_date = (
+            datetime.now() - timedelta(days=1)
+        ).strftime("%d.%m.%Y")
 
-        await asyncio.sleep(sleep_seconds)
-
-        report_date = datetime.now().strftime("%d.%m.%Y")
+        print("SEND DAILY REPORT")
 
         for key, stats in calories_stats.items():
 
             try:
 
-                total = round(stats["calories"])
+                total = round(
+                    stats["calories"]
+                )
 
                 text = (
-                    f"Всего захавано {total} каллорий "
+                    f"Всего захавано "
+                    f"{total} каллорий "
                     f"за {report_date}"
                 )
+
+                print(text)
 
                 if stats["thread_id"]:
 
@@ -173,6 +189,8 @@ async def daily_report_loop():
                 traceback.print_exc()
 
         calories_stats.clear()
+
+        print("CALORIES RESET")
 
 # =========================
 # START COMMAND
@@ -621,7 +639,7 @@ async def text_food_handler(message: Message):
         import re
 
         weight_match = re.search(
-            r"(\\d+)\\s*г",
+            r"(\d+)\s*г",
             text_input.lower()
         )
 
