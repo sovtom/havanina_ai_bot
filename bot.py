@@ -656,10 +656,58 @@ async def text_food_handler(message: Message):
 
         if not nutrition:
 
-            nutrition = {
-                "calories_per_100g": "?",
-                "total_calories": "?"
-            }
+            print("USE TEXT AI FALLBACK")
+
+            try:
+
+                prompt = f"""
+Продукт:
+{name}
+
+Вес:
+{weight} г
+
+Определи:
+- калории на 100 г
+- калории всего продукта
+
+Ответ только JSON:
+
+{{
+  "calories_per_100g": 0,
+  "total_calories": 0
+}}
+"""
+
+                text = analyze_product(
+                    prompt
+                )
+
+                text = text.strip()
+
+                if "```json" in text:
+                    text = text.split("```json")[1]
+
+                if "```" in text:
+                    text = text.split("```")[0]
+
+                text = text.strip()
+
+                start = text.find("{")
+                end = text.rfind("}")
+
+                text = text[start:end + 1]
+
+                nutrition = json.loads(text)
+
+            except Exception:
+
+                traceback.print_exc()
+
+                nutrition = {
+                    "calories_per_100g": "?",
+                    "total_calories": "?"
+                }
 
         if nutrition["total_calories"] != "?":
 
