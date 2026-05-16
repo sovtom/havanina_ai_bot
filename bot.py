@@ -4,7 +4,7 @@ import base64
 import tempfile
 import traceback
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 from dotenv import load_dotenv
@@ -18,6 +18,14 @@ from fastapi import FastAPI, Request
 
 import uvicorn
 import requests
+
+# =========================
+# MOSCOW TIMEZONE
+# =========================
+
+MSK = timezone(
+    timedelta(hours=3)
+)
 
 # =========================
 # LOAD ENV
@@ -119,11 +127,9 @@ def save_calories(message: Message, calories):
 
 async def daily_report_loop():
 
-    from datetime import timedelta
-
     while True:
 
-        now = datetime.now()
+        now = datetime.now(MSK)
 
         next_midnight = (
             now + timedelta(days=1)
@@ -139,7 +145,16 @@ async def daily_report_loop():
         ).total_seconds()
 
         print(
-            f"SLEEP UNTIL MIDNIGHT: "
+            f"MSK NOW: {now}"
+        )
+
+        print(
+            f"NEXT MSK MIDNIGHT: "
+            f"{next_midnight}"
+        )
+
+        print(
+            f"SLEEP SECONDS: "
             f"{sleep_seconds}"
         )
 
@@ -148,7 +163,7 @@ async def daily_report_loop():
         )
 
         report_date = (
-            datetime.now() - timedelta(days=1)
+            datetime.now(MSK) - timedelta(days=1)
         ).strftime("%d.%m.%Y")
 
         print("SEND DAILY REPORT")
