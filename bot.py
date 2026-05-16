@@ -228,6 +228,8 @@ def analyze_product(prompt, image_base64=None):
 
                 payload = {
                     "model": model,
+                    "temperature": 0,
+                    "top_p": 0.1,
                     "messages": [
                         {
                             "role": "user",
@@ -251,6 +253,8 @@ def analyze_product(prompt, image_base64=None):
 
                 payload = {
                     "model": model,
+                    "temperature": 0,
+                    "top_p": 0.1,
                     "messages": [
                         {
                             "role": "user",
